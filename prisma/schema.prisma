@@ -1,0 +1,1028 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_DATABASE_URL")
+}
+
+model User {
+  id                    String              @id @default(cuid())
+  email                 String
+  username              String?             @unique
+  firstName             String?
+  lastName              String?
+  phone                 String?
+  avatar                String?
+  role                  UserRole            @default(CUSTOMER)
+  passwordHash          String?
+  emailVerified         Boolean             @default(false)
+  phoneVerified         Boolean             @default(false)
+  // Admin control fields
+  isBlocked             Boolean             @default(false)
+  blockedAt             DateTime?
+  blockReason           String?
+  unblockRequestReason  String?            // User's reason for requesting unblock
+  unblockRequestStatus  String?            // PENDING, APPROVED, REJECTED
+  bio                   String?
+  location              String?
+  timezone              String?
+  preferences           Json?
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+  lastLoginAt           DateTime?
+  onboardingStatus      OnboardingStatus    @default(NONE)
+  passwordResetExpires  DateTime?
+  passwordResetToken    String?
+  bookings              Booking[]
+  eventsAsAttendee      EventAttendance[]
+  eventChatMessages     EventChatMessage[]  @relation("Event_Message_User")
+  eventsAsOrganizer     Event[]             @relation("EventOrganizer")
+  notifications         Notification[]
+  quoteRequests         QuoteRequest[]
+  reviews               Review[]
+  rfqsAsOrganizer       RFQ[]               @relation("RFQOrganizer")
+  serviceBids           ServiceBid[]
+  travelBookingItems    TravelBookingItem[]
+  vendorProfile         Vendor?
+  workOrdersAsOrganizer WorkOrder[]         @relation("WorkOrderOrganizer")
+  payoutsAsOrganizer    Payout[]            @relation("PayoutOrganizer")
+  claimedExternalVendors ExternalVendor[]   @relation("ClaimedExternalVendors")
+
+  // Stripe Connect for organizers
+  stripeAccountId            String?
+  stripeConnectEnabled       Boolean @default(false)
+  stripeConnectOnboardingUrl String?
+
+  @@unique([email, role])
+  @@map("users")
+}
+
+model Event {
+  id                String             @id @default(cuid())
+  title             String
+  description       String?
+  category          EventCategory
+  subcategory       String?
+  venue             String?
+  address           String?
+  city              String?
+  state             String?
+  country           String?
+  zipcode           String?
+  coordinates       Json?
+  startDate         DateTime
+  endDate           DateTime?
+  timezone          String?
+  basePrice         Decimal?
+  currency          String             @default("USD")
+  pricingTiers      Json?
+  maxCapacity       Int?
+  currentBookings   Int                @default(0)
+  status            EventStatus        @default(DRAFT)
+  visibility        EventVisibility    @default(PUBLIC)
+  externalId        String?
+  externalSource    String?
+  externalUrl       String?
+  images            String[]
+  coverImage        String?
+  tags              String[]
+  metadata          Json?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  publishedAt       DateTime?
+  organizerId       String
+  embeddings        Float[]
+  bookings          Booking[]
+  attendees         EventAttendance[]
+  eventChatMessages EventChatMessage[] @relation("Event_Message_Event")
+  services          EventService[]
+  vendors           EventVendor[]
+  organizer         User               @relation("EventOrganizer", fields: [organizerId], references: [id])
+  reviews           Review[]
+  ratingAverage     Decimal            @default(0)
+  ratingCount       Int                @default(0)
+  ratingDistribution Json              @default("{}")
+  rfqs              RFQ[]
+  
+  // Admin flagging fields
+  isFlagged         Boolean            @default(false)
+  flaggedAt         DateTime?
+  
+  // Homepage featuring
+  featuredOnHomepage Boolean           @default(false)
+  flaggedBy         String?            // Admin user ID
+  flagReason        String?
+  unflagRequestReason String?          // Organizer's reason for requesting unflag
+  unflagRequestStatus String?          // PENDING, APPROVED, REJECTED
+
+  @@map("events")
+}
+
+model EventService {
+  id          String             @id @default(cuid())
+  title       String
+  description String?
+  category    VendorCategory
+  budget      Decimal?
+  currency    String             @default("USD")
+  status      EventServiceStatus @default(ACTIVE)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  eventId     String
+  postalCode  String?
+  event       Event              @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  bids        ServiceBid[]
+
+  @@map("event_services")
+}
+
+model ServiceBid {
+  id             String           @id @default(cuid())
+  eventServiceId String
+  vendorId       String
+  userId         String?
+  bidAmount      Decimal
+  currency       String           @default("USD")
+  message        String
+  attachments    String[]
+  status         ServiceBidStatus @default(PENDING)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  eventService   EventService     @relation(fields: [eventServiceId], references: [id], onDelete: Cascade)
+  user           User?            @relation(fields: [userId], references: [id])
+  vendor         Vendor           @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  workOrder      WorkOrder?
+
+  @@map("service_bids")
+}
+
+model EventAttendance {
+  id             String           @id @default(cuid())
+  status         AttendanceStatus @default(INVITED)
+  rsvpDate       DateTime?
+  checkInAt      DateTime?
+  eventId        String
+  userId         String
+  event          Event            @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user           User             @relation(fields: [userId], references: [id])
+  travelBookings TravelBooking[]
+
+  @@unique([eventId, userId])
+  @@map("event_attendance")
+}
+
+model Vendor {
+  id                          String                   @id @default(cuid())
+  businessName                String
+  description                 String?
+  category                    VendorCategory
+  subcategory                 String?
+  email                       String
+  phone                       String?
+  website                     String?
+  address                     String?
+  city                        String?
+  state                       String?
+  country                     String?
+  serviceRadius               Int?
+  licenseNumber               String?
+  insuranceExpiry             DateTime?
+  yearsInBusiness             Int?
+  kycStatus                   KYCStatus                @default(PENDING)
+  verifiedAt                  DateTime?
+  verificationDocs            String[]
+  googleBusinessId            String?
+  yelpId                      String?
+  trustpilotId                String?
+  facebookId                  String?
+  instagramId                 String?
+  averageRating               Decimal                  @default(0)
+  totalReviews                Int                      @default(0)
+  isActive                    Boolean                  @default(true)
+  availability                Json?
+  createdAt                   DateTime                 @default(now())
+  updatedAt                   DateTime                 @updatedAt
+  userId                      String                   @unique
+  documents                   Json?
+  googleBusinessUrl           String?
+  googleVerificationStatus    GoogleVerificationStatus @default(PENDING)
+  notes                       String?
+  stripeVerificationData      Json?
+  stripeVerificationReportId  String?
+  stripeVerificationSessionId String?
+  stripeVerificationStatus    StripeVerificationStatus @default(NOT_STARTED)
+  portfolio                   String[]
+  pricingPackages             Json?
+  profilePicture              String?
+  postalCode                  String?
+  completedJobs               Int                      @default(0)
+  totalBids                   Int                      @default(0)
+  stripeAccountId             String?
+  stripeConnectEnabled        Boolean                  @default(false)
+  stripeConnectOnboardingUrl  String?
+  // AI Onboarding Fields
+  aiProfile                   Json?
+  aiOnboardingCompleted       Boolean                  @default(false)
+  aiOnboardingData            Json?
+  aiTags                      String[]
+  aiPersona                   String?
+  aiConfidenceScore           Float?
+  featuredOnHomepage          Boolean                 @default(false)
+  eventChatMessages           EventChatMessage[]       @relation("Event_Message_Vendor")
+  events                      EventVendor[]
+  payouts                     Payout[]
+  portfolioProjects           PortfolioProject[]
+  proposals                   Proposal[]
+  quoteRequests               QuoteRequest[]
+  reviews                     Review[]
+  serviceBids                 ServiceBid[]
+  newServices                 Service[]
+  services                    VendorService[]
+  user                        User                     @relation(fields: [userId], references: [id])
+  workOrders                  WorkOrder[]
+  onboardingSessions          OnboardingSession[]
+
+  @@index([userId])
+  @@index([isActive])
+  @@index([category])
+  @@map("vendors")
+}
+
+model PortfolioProject {
+  id          String   @id @default(cuid())
+  title       String
+  description String
+  category    String
+  images      String[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  vendorId    String
+  vendor      Vendor   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@map("portfolio_projects")
+}
+
+model OnboardingSession {
+  id            String   @id @default(cuid())
+  vendorId      String?
+  sessionData   Json?
+  finalProfile  Json?    // Final generated profile
+  tags          String[] @default([])
+  createdAt     DateTime @default(now())
+  vendor        Vendor?  @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@index([vendorId])
+  @@map("onboarding_sessions")
+}
+
+model VendorService {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  basePrice   Decimal?
+  currency    String   @default("USD")
+  duration    Int?
+  minNotice   Int?
+  vendorId    String
+  vendor      Vendor   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@map("vendor_services")
+}
+
+model FeaturedHotel {
+  id             String   @id @default(cuid())
+  amadeusHotelId String   // Amadeus hotel ID
+  name           String
+  cityCode       String
+  cityName       String?
+  imageUrl       String?
+  price          String?  // e.g. "$119/nt"
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  @@index([sortOrder])
+  @@map("featured_hotels")
+}
+
+// External (e.g. OSM) vendors – shown on Find Vendor until claimed
+model ExternalVendor {
+  id               String    @id @default(cuid())
+  source           String    @default("OSM")
+  externalId       String
+  name             String
+  email            String
+  phone            String?
+  address          String?
+  city             String?
+  state            String?
+  country          String?
+  lat              Float?
+  lon              Float?
+  category         String    // maps to VendorCategory or raw OSM tag
+  region           String    // AMERICA | EUROPE
+  website          String?
+  imageUrl         String?
+  isClaimed        Boolean   @default(false)
+  claimedByUserId  String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  claimedByUser    User?     @relation("ClaimedExternalVendors", fields: [claimedByUserId], references: [id])
+  quoteRequests    ExternalQuoteRequest[]
+
+  @@unique([source, externalId])
+  @@index([region])
+  @@index([isClaimed])
+  @@index([claimedByUserId])
+  @@map("external_vendors")
+}
+
+// Quote requests for external vendors (before they sign up)
+model ExternalQuoteRequest {
+  id                String   @id @default(cuid())
+  externalVendorId  String
+  userId            String?
+  fullName          String
+  email             String
+  phone             String
+  eventType         String
+  eventDate         DateTime
+  eventLocation     String
+  numberOfGuests    String
+  budgetRange       String
+  additionalDetails String?
+  status            String   @default("PENDING")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  quoteRequestId    String?  @unique
+  externalVendor    ExternalVendor @relation(fields: [externalVendorId], references: [id], onDelete: Cascade)
+  quoteRequest      QuoteRequest? @relation(fields: [quoteRequestId], references: [id], onDelete: SetNull)
+
+  @@index([externalVendorId])
+  @@map("external_quote_requests")
+}
+
+model Service {
+  id              String           @id @default(cuid())
+  name            String
+  description     String?
+  category        VendorCategory
+  packages        Json
+  media           String[]
+  availability    Json?
+  status          ServiceStatus    @default(DRAFT)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  vendorId        String
+  bookingRequests BookingRequest[]
+  reviews         Review[]
+  vendor          Vendor           @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@index([vendorId])
+  @@index([status])
+  @@index([category])
+  @@map("services")
+}
+
+model BookingRequest {
+  id            String               @id @default(cuid())
+  customerName  String
+  customerEmail String
+  customerPhone String?
+  amount        Decimal
+  currency      String               @default("USD")
+  date          DateTime
+  status        BookingRequestStatus @default(PENDING)
+  notes         String?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  serviceId     String
+  packageTier   String?
+  paymentId     String?
+  paymentMethod String?
+  paymentStatus PaymentStatus        @default(PENDING)
+  service       Service              @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@map("booking_requests")
+}
+
+model EventVendor {
+  id        String       @id @default(cuid())
+  status    VendorStatus @default(INVITED)
+  awardedAt DateTime?
+  eventId   String
+  vendorId  String
+  event     Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  vendor    Vendor       @relation(fields: [vendorId], references: [id])
+
+  @@unique([eventId, vendorId])
+  @@map("event_vendors")
+}
+
+model RFQ {
+  id           String         @id @default(cuid())
+  title        String
+  description  String
+  category     VendorCategory
+  budget       Decimal?
+  currency     String         @default("USD")
+  requirements Json?
+  deadline     DateTime?
+  eventDate    DateTime?
+  postalCode   String?
+  status       RFQStatus      @default(OPEN)
+  awardedTo    String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  closedAt     DateTime?
+  eventId      String
+  organizerId  String
+  proposals    Proposal[]
+  event        Event          @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  organizer    User           @relation("RFQOrganizer", fields: [organizerId], references: [id])
+
+  @@map("rfqs")
+}
+
+model Proposal {
+  id           String         @id @default(cuid())
+  title        String
+  description  String
+  price        Decimal
+  currency     String         @default("USD")
+  deliverables Json?
+  timeline     String?
+  terms        String?
+  status       ProposalStatus @default(SUBMITTED)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  rfqId        String
+  vendorId     String
+  rfq          RFQ            @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+  vendor       Vendor         @relation(fields: [vendorId], references: [id])
+
+  @@map("proposals")
+}
+
+model Booking {
+  id             String          @id @default(cuid())
+  bookingNumber  String          @unique
+  totalAmount    Decimal
+  currency       String          @default("USD")
+  fees           Json?
+  status         BookingStatus   @default(PENDING)
+  paymentStatus  PaymentStatus   @default(PENDING)
+  paymentMethod  String?
+  paymentId      String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  confirmedAt    DateTime?
+  userId         String
+  eventId        String
+  event          Event           @relation(fields: [eventId], references: [id])
+  user           User            @relation(fields: [userId], references: [id])
+  tickets        Ticket[]
+  travelBookings TravelBooking[]
+
+  @@map("bookings")
+}
+
+model Ticket {
+  id           String       @id @default(cuid())
+  ticketNumber String       @unique
+  qrCode       String       @unique
+  price        Decimal
+  currency     String       @default("USD")
+  tier         String?
+  status       TicketStatus @default(ACTIVE)
+  usedAt       DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  bookingId    String
+  booking      Booking      @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@map("tickets")
+}
+
+model TravelBooking {
+  id                 String          @id @default(cuid())
+  type               TravelType
+  provider           String
+  externalId         String?
+  destination        String
+  checkIn            DateTime?
+  checkOut           DateTime?
+  travelers          Int             @default(1)
+  totalAmount        Decimal
+  currency           String          @default("USD")
+  status             TravelStatus    @default(PENDING)
+  confirmationNumber String?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  bookingId          String
+  attendanceId       String
+  attendance         EventAttendance @relation(fields: [attendanceId], references: [id])
+  booking            Booking         @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@map("travel_bookings")
+}
+
+model Review {
+  id          String     @id @default(cuid())
+  rating      Int
+  title       String?
+  comment     String?
+  type        ReviewType
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  reviewerId  String
+  eventId     String?
+  vendorId    String?
+  serviceId   String?
+  workOrderId String?    @unique
+  event       Event?     @relation(fields: [eventId], references: [id])
+  reviewer    User       @relation(fields: [reviewerId], references: [id])
+  service     Service?   @relation(fields: [serviceId], references: [id])
+  vendor      Vendor?    @relation(fields: [vendorId], references: [id])
+  workOrder   WorkOrder? @relation(fields: [workOrderId], references: [id])
+  isDeleted   Boolean    @default(false)
+  deletedAt   DateTime?
+
+  @@map("reviews")
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  title     String
+  message   String
+  type      NotificationType
+  read      Boolean          @default(false)
+  metadata  Json?
+  createdAt DateTime         @default(now())
+  readAt    DateTime?
+  userId    String
+  user      User             @relation(fields: [userId], references: [id])
+
+  @@map("notifications")
+}
+
+model TravelBookingItem {
+  id              String        @id @default(cuid())
+  userId          String
+  type            String
+  itemData        Json
+  price           String
+  fullName        String
+  email           String
+  status          String        @default("PENDING")
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  paymentId       String?
+  paymentIntentId String?
+  paymentMethod   String?
+  paymentStatus   PaymentStatus @default(PENDING)
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("travel_booking_items")
+}
+
+model ExternalEvent {
+  id            String         @id @default(cuid())
+  source        ExternalSource
+  sourceId      String         @unique
+  title         String
+  startDate     DateTime?
+  city          String?
+  coverImage    String?
+  externalUrl   String?
+  raw           Json?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  category      String?
+  description   String?
+  endDate       DateTime?
+  organizerName String?
+  price         String?
+  venueName     String?
+
+  @@map("external_events")
+}
+
+model QuoteRequest {
+  id                    String             @id @default(cuid())
+  fullName              String
+  email                 String
+  phone                 String
+  eventType             String
+  eventDate             DateTime
+  eventLocation         String
+  numberOfGuests        String
+  budgetRange           String
+  additionalDetails     String?
+  status                QuoteRequestStatus @default(PENDING)
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+  vendorId              String
+  userId                String?
+  counterOfferMessage   String?
+  counterOfferPrice     Decimal?
+  quoteAttachments      String[]
+  quoteMessage          String?
+  quotePrice            Decimal?
+  userResponse          String?
+  deliveryTime          String?
+  escrowLockedAt        DateTime?
+  finalPrice            Decimal?
+  finalPriceConfirmed   Boolean            @default(false)
+  finalPriceConfirmedAt DateTime?
+  finalPriceDescription String?
+  messages              QuoteMessage[]
+  user                  User?              @relation(fields: [userId], references: [id])
+  vendor                Vendor             @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  workOrder             WorkOrder?
+  externalQuoteRequest  ExternalQuoteRequest?
+
+  @@map("quote_requests")
+}
+
+model QuoteMessage {
+  id             String       @id @default(cuid())
+  quoteRequestId String
+  senderId       String
+  senderType     String
+  message        String
+  attachments    String[]
+  createdAt      DateTime     @default(now())
+  messageType    MessageType  @default(NORMAL)
+  quoteRequest   QuoteRequest @relation(fields: [quoteRequestId], references: [id], onDelete: Cascade)
+
+  @@map("quote_messages")
+}
+
+model EventChatMessage {
+  id          String      @id @default(cuid())
+  eventId     String
+  vendorId    String
+  userId      String
+  senderId    String
+  senderType  String
+  message     String
+  attachments String[]
+  createdAt   DateTime    @default(now())
+  messageType MessageType @default(NORMAL)
+  event       Event       @relation("Event_Message_Event", fields: [eventId], references: [id], onDelete: Cascade)
+  user        User        @relation("Event_Message_User", fields: [userId], references: [id])
+  vendor      Vendor      @relation("Event_Message_Vendor", fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@index([eventId, vendorId])
+  @@map("event_chat_messages")
+}
+
+model WorkOrder {
+  id                String          @id @default(cuid())
+  quoteRequestId    String?         @unique
+  serviceBidId      String?         @unique
+  vendorId          String
+  organizerId       String
+  status            WorkOrderStatus @default(IN_PROGRESS)
+  submittedAt       DateTime?
+  completedAt       DateTime?
+  revisionCount     Int             @default(0)
+  revisionNotes     String?
+  refundStatus      RefundStatus    @default(NONE) @map("refundstatus")
+  refundRequestedAt DateTime?       @map("refundrequestedat")
+  refundResolvedAt  DateTime?       @map("refundresolvedat")
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  paymentIntentId   String?
+  paymentStatus     PaymentStatus   @default(PENDING)
+  review            Review?
+  organizer         User            @relation("WorkOrderOrganizer", fields: [organizerId], references: [id])
+  quoteRequest      QuoteRequest?   @relation(fields: [quoteRequestId], references: [id], onDelete: Cascade)
+  serviceBid        ServiceBid?     @relation(fields: [serviceBidId], references: [id], onDelete: Cascade)
+  vendor            Vendor          @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@index([vendorId])
+  @@index([organizerId])
+  @@index([status])
+  @@map("work_orders")
+}
+
+model Payout {
+  id               String       @id @default(cuid())
+  vendorId         String?
+  organizerId      String?
+  amount           Decimal
+  currency         String       @default("USD")
+  status           PayoutStatus @default(PENDING)
+  stripePayoutId   String?
+  stripeTransferId String?
+  failureCode      String?
+  failureMessage   String?
+  paidAt           DateTime?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  vendor           Vendor?      @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  organizer        User?        @relation("PayoutOrganizer", fields: [organizerId], references: [id], onDelete: Cascade)
+
+  @@index([vendorId])
+  @@index([organizerId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("payouts")
+}
+
+model PlatformFee {
+  id                String            @id @default(cuid())
+  sourceType         PlatformFeeSource
+  sourceId           String            // bookingId, bookingRequestId, or workOrderId
+  subtotal           Decimal           // Base amount before fee
+  feeAmount          Decimal           // Platform fee (10% of subtotal)
+  totalAmount        Decimal           // Total paid by customer (subtotal + fee)
+  currency           String            @default("USD")
+  paymentIntentId    String?           // Stripe payment intent ID
+  status             PlatformFeeStatus @default(PENDING)
+  withdrawnAt        DateTime?
+  withdrawalPayoutId String?           // Reference to platform withdrawal payout
+  metadata           Json?             // Additional transaction details
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  @@index([sourceType, sourceId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("platform_fees")
+}
+
+model FooterSettings {
+  id             String   @id @default(cuid())
+  supportPhone   String?
+  whatsappPhone  String?
+  supportEmail   String?
+  socialLinks    Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("footer_settings")
+}
+
+enum PlatformFeeSource {
+  EVENT_BOOKING
+  SERVICE_BOOKING
+  WORK_ORDER
+}
+
+enum PlatformFeeStatus {
+  PENDING
+  AVAILABLE
+  WITHDRAWN
+}
+
+enum UserRole {
+  CUSTOMER
+  ORGANIZER
+  VENDOR
+  ADMIN
+  GUEST
+}
+
+enum OnboardingStatus {
+  NONE
+  IN_PROGRESS
+  SUBMITTED
+  APPROVED
+  COMPLETED
+}
+
+enum EventCategory {
+  CONCERT
+  CONFERENCE
+  WEDDING
+  CORPORATE
+  SPORTS
+  FESTIVAL
+  PARTY
+  WORKSHOP
+  EXHIBITION
+  OTHER
+}
+
+enum EventStatus {
+  DRAFT
+  PUBLISHED
+  CANCELLED
+  COMPLETED
+  POSTPONED
+}
+
+enum EventVisibility {
+  PUBLIC
+  PRIVATE
+  UNLISTED
+}
+
+enum AttendanceStatus {
+  INVITED
+  RSVP_YES
+  RSVP_NO
+  MAYBE
+  CHECKED_IN
+  NO_SHOW
+}
+
+enum VendorCategory {
+  CATERING
+  PHOTOGRAPHY
+  VIDEography
+  MUSIC_DJ
+  DECORATION
+  FLOWERS
+  TRANSPORTATION
+  SECURITY
+  CLEANING
+  EQUIPMENT_RENTAL
+  VENUE
+  OTHER
+}
+
+enum KYCStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+  EXPIRED
+}
+
+enum GoogleVerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+  PENDING_REVIEW
+}
+
+enum StripeVerificationStatus {
+  NOT_STARTED
+  PROCESSING
+  VERIFIED
+  REQUIRES_INPUT
+  CANCELED
+  FAILED
+}
+
+enum ServiceStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum BookingRequestStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  COMPLETED
+  CANCELLED
+}
+
+enum VendorStatus {
+  INVITED
+  INTERESTED
+  AWARDED
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+}
+
+enum RFQStatus {
+  OPEN
+  CLOSED
+  AWARDED
+  CANCELLED
+}
+
+enum ProposalStatus {
+  SUBMITTED
+  UNDER_REVIEW
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  REFUNDED
+  COMPLETED
+}
+
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+enum TicketStatus {
+  ACTIVE
+  USED
+  CANCELLED
+  REFUNDED
+}
+
+enum TravelType {
+  HOTEL
+  FLIGHT
+  CAR_RENTAL
+  PACKAGE
+}
+
+enum TravelStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+}
+
+enum ReviewType {
+  EVENT
+  VENDOR
+  TRAVEL
+}
+
+enum NotificationType {
+  EVENT_UPDATE
+  BOOKING_CONFIRMATION
+  VENDOR_PROPOSAL
+  RFQ_RESPONSE
+  TRAVEL_BOOKING
+  PAYMENT_UPDATE
+  SYSTEM
+}
+
+enum ExternalSource {
+  EVENTBRITE
+  TICKETMASTER
+  SEATGEEK
+  OTHER
+}
+
+enum WorkOrderStatus {
+  IN_PROGRESS
+  SUBMITTED
+  REVISION_REQUESTED
+  COMPLETED
+  CANCELLED
+}
+
+enum RefundStatus {
+  NONE
+  REQUESTED
+  APPROVED
+  REJECTED
+  NEED_MORE_INFO
+  REFUNDED
+
+  @@map("refundstatus")
+}
+
+enum MessageType {
+  NORMAL
+  WORK_SUBMISSION
+}
+
+enum EventServiceStatus {
+  ACTIVE
+  INACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum ServiceBidStatus {
+  PENDING
+  UNDER_REVIEW
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+}
+
+enum QuoteRequestStatus {
+  PENDING
+  CONTACTED
+  QUOTED
+  ACCEPTED
+  REJECTED
+  CANCELLED
+  NEGOTIATING
+}
+
+enum PayoutStatus {
+  PENDING
+  PROCESSING
+  PAID
+  FAILED
+  CANCELED
+}
